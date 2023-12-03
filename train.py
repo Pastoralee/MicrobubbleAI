@@ -6,6 +6,20 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from prodigyopt import Prodigy
 import metrics as mt
+import torch.nn.functional as F
+
+class DynamicMSELoss(nn.Module):
+    def __init__(self):
+        super(DynamicMSELoss, self).__init__()
+    
+    def forward(self, pred, ground_truth):
+        ground_truth = ground_truth.view(-1, 2)
+        pred = pred.view(-1, 2)
+        mask = (ground_truth.sum(dim=1) != 0)
+        masked_prediction = pred[mask]
+        masked_ground_truth = ground_truth[mask]
+        mse_loss = nn.MSELoss()(masked_prediction, masked_ground_truth)
+        return mse_loss
 
 def adjust_tensor_shapes(pred, pos, device):
     max_size = max(max(torch.numel(t)/2 for t in pos), (torch.numel(pred)/len(pos))/2) #len(pos)=batch_size       
@@ -47,7 +61,7 @@ def get_nbBubbles_groundTruth(positions, max_bulles):
     return torch.reshape(torch.tensor([(i) for i in result]), (-1, 1))
 
 def train_position_model(model, args, device, train_loader, test_loader, origin, data_size, max_bulles):
-    criterion = nn.MSELoss()
+    criterion = args.loss
     optimizer = Prodigy(model.parameters(), lr=1., weight_decay=args.weightDecay)
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
     train_accuracy_save, train_abs_diff_total_save, test_accuracy_save, test_abs_diff_total_save, losses, epochs = [], [], [], [], [], []

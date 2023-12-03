@@ -79,7 +79,8 @@ class UnetPosition(nn.Module):
             nn.ReLU(),
             nn.Linear(1024, 256),
             nn.ReLU(),
-            nn.Linear(256, 2*nb_max_bulles))
+            nn.Linear(256, 2*nb_max_bulles),
+            nn.Tanh())
 
     def forward(self, x):
         up1, x = self.e1(x)

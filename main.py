@@ -5,6 +5,7 @@ from networks.UnetPosition import UnetPosition
 from networks.UnetBulle import UnetBulle
 from train import train_position_model
 from train import train_bulle_model
+from train import DynamicMSELoss
 
 @dataclass
 class Args():
@@ -17,15 +18,25 @@ class Args():
     shuffle: bool #mélanger les données
     weightDecay: float
     epochs: int
+    trainType: int #0 = position, 1 = nbBulles
+    loss: torch.nn.Module #DynamicMSELoss() ou torch.nn.MSELoss()
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-args = Args("D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow", "D:\\ChefOeuvre\\save", device, 0.15, 16, 1, True, 0.01, 20)
-
-train_position = False
+args = Args(pathData = "D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow",
+            pathSave = "D:\\ChefOeuvre\\save",
+            device = device,
+            testSize = 0.15,
+            batchSize = 16,
+            numWorkers = 1,
+            shuffle = True,
+            weightDecay = 0.01,
+            epochs = 40,
+            trainType = 0,
+            loss = DynamicMSELoss())
 
 #ClutterList = [-60 -40 -30 -25 -20 -15 -10]
 train_loader, test_loader, origin, data_size, max_bulles = load_dataset(args)
-if train_position:
+if args.trainType == 0:
     model = UnetPosition(max_bulles)
     model = model.to(device)
     train_position_model(model, args, device, train_loader, test_loader, origin, data_size, max_bulles)

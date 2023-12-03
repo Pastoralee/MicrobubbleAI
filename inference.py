@@ -10,8 +10,8 @@ from os.path import join
 import numpy as np
 from scipy import ndimage
 from torch.nn.functional import normalize
-from PIL import Image
 import json
+import matplotlib.pyplot as plt
 
 #A CHANGER PLUS TARD
 dataType = "Flow"
@@ -77,7 +77,7 @@ model_pos.to(device)
 model_nbbulles.eval()
 model_nbbulles.to(device)
 if dataType == "Flow":
-    IQs, xy_pos, Origin, data_size, max_bulles = read_flow_data(pathData)
+    IQs, xy_pos, origin, data_size, max_bulles = read_flow_data(pathData)
     random_samples = torch.randint(high=IQs.shape[0], size=(nbSamples,))
     result_dict = {}
     for i, num in enumerate(random_samples):
@@ -89,9 +89,16 @@ if dataType == "Flow":
         img_numpy = img_tensor.cpu().detach().numpy() if device==torch.device("cuda") else img_tensor.detach().numpy()
         pos_prediction[:, 0] *= data_size[1]
         pos_prediction[:, 1] *= data_size[0]
-        im = Image.fromarray(img_numpy*255)
-        im = im.convert("L")
-        im.save(pathSave + f"img_{i}.png")
+        #ground_truth = xy_pos[num].clone()
+        #ground_truth = ground_truth[torch.isfinite(ground_truth)]
+        #ground_truth = torch.reshape(ground_truth, (-1, 2))
+        #ground_truth[:, 0] = ground_truth[:, 0] - origin[0]
+        #ground_truth[:, 1] = ground_truth[:, 1] - origin[2]
+        #ground_truth = ground_truth[~torch.any(ground_truth<0, axis=1)] #enlève les valeurs inférieures à 0
+        #ground_truth = ground_truth[torch.logical_and(ground_truth[:, 0] <= data_size[1], ground_truth[:, 1] <= data_size[0])] #enlève les valeurs supérieures aux bordures de l'image
+        #print(f"img n°{i}: {ground_truth}")
+        plt.imshow(img_numpy, cmap='gray')
+        plt.savefig(pathSave + f"img_{i}.png")
         result_dict[f'pred_nbBulles_img{i}'] = int(nbbulles_prediction)
         result_dict[f'pred_position_img{i}'] = pos_prediction[:int(nbbulles_prediction),:].tolist()
     with open(pathSave + 'result.json', 'w') as json_file:

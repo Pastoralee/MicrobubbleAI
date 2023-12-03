@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import train as tr
+import matplotlib.pyplot as plt
 
 def get_bubble_accuracy(model, dataloader, device, max_bulles):
     model.eval()
@@ -26,8 +27,12 @@ def get_position_accuracy(model, dataloader, origin, data_size, device):
         out_xy = out_xy.cpu().detach().numpy() if device==torch.device("cuda") else out_xy.detach().numpy()
         ground_truth = torch.squeeze(ground_truth).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(ground_truth).detach().numpy()
         ground_truth = ground_truth[~np.any(ground_truth<=0, axis=1)]
+        ground_truth[:, 0] *= data_size[1]
+        ground_truth[:, 1] *= data_size[0]
         Nb_ref = ground_truth.shape[0]
         out_xy = out_xy[:Nb_ref, :]
+        out_xy[:, 0] *= data_size[1]
+        out_xy[:, 1] *= data_size[0]
         abs_diff = out_xy-ground_truth
         abs_diff = np.sqrt(abs_diff[:,0]**2 + abs_diff[:,1]**2)
         abs_diff_total += np.sum(abs_diff)
