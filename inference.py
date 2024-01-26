@@ -20,7 +20,6 @@ import cv2
 #A CHANGER PLUS TARD
 dataType = "Flow"
 nbSamples = 10
-seuil = 0.8
 
 def read_flow_data(pathData):
     def PALA_AddNoiseInIQ(IQ, power, impedance, sigmaGauss, clutterdB, amplCullerdB):

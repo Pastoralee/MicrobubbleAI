@@ -29,7 +29,7 @@ args = Args(pathData = "D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow",
             numWorkers = 1,
             shuffle = True,
             weightDecay = 0.01,
-            epochs = 30,
+            epochs = 1,
             trainType = 1,
             loss = nn.L1Loss())
 

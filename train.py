@@ -1,13 +1,10 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
 import torch.optim.lr_scheduler as lr_scheduler
 from tqdm import tqdm
-import matplotlib.pyplot as plt
 from prodigyopt import Prodigy
 import metrics as mt
 import util as ut
-import torch.nn.functional as F
 
 class DynamicMSELoss(nn.Module):
     def __init__(self):
@@ -132,24 +129,8 @@ def train_position_model(model, args, train_loader, test_loader, origin, data_si
         print(f"Test: Accuracy: {test_accuracy}, RMSE: {test_abs_diff_total}")
     
     ut.plot_loss(epochs, losses, args.pathSave)
-
-    plt.clf()
-    plt.title("Accuracy")
-    plt.plot(epochs, train_accuracy_save, label="Train")
-    plt.plot(epochs, test_accuracy_save, label="Test")
-    plt.xlabel("Epochs")
-    plt.ylabel("Accuracy")
-    plt.legend(loc='best')
-    plt.savefig(args.pathSave + '/accuracy.png')
-
-    plt.clf()
-    plt.title("RMSE")
-    plt.plot(epochs, train_abs_diff_total_save, label="Train")
-    plt.plot(epochs, test_abs_diff_total_save, label="Test")
-    plt.xlabel("Epochs")
-    plt.ylabel("RMSE")
-    plt.legend(loc='best')
-    plt.savefig(args.pathSave + '/rmse.png')
+    ut.plot_metrics(epochs, train_accuracy_save, test_accuracy_save, "Accuracy", args.pathSave)
+    ut.plot_metrics(epochs, train_abs_diff_total_save, test_abs_diff_total_save, "RMSE", args.pathSave)
 
 def train_bulle_model(model, args, train_loader, test_loader, max_bulles):
     optimizer = Prodigy(model.parameters(), lr=1., weight_decay=args.weightDecay)
@@ -183,12 +164,4 @@ def train_bulle_model(model, args, train_loader, test_loader, max_bulles):
         print(f"Test BullesErreur: {test_erreur_bulles}")
     
     ut.plot_loss(epochs, losses, args.pathSave)
-
-    plt.clf()
-    plt.title("BubbleError")
-    plt.plot(epochs, train_erreur_bulles_save, label="Train")
-    plt.plot(epochs, test_erreur_bulles_save, label="Test")
-    plt.xlabel("Epochs")
-    plt.ylabel("BubbleError")
-    plt.legend(loc='best')
-    plt.savefig(args.pathSave + '/bubbleError.png')
+    ut.plot_metrics(epochs, train_erreur_bulles_save, test_erreur_bulles_save, "BubbleError", args.pathSave)
