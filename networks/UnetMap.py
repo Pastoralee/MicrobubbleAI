@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import math
-from util import pad_to
+import torch.nn.functional as F
 
 class Bottleneck(nn.Module):
     def __init__(self, in_channels, out_channels, kernel_size):
@@ -38,14 +38,14 @@ class Encoder(nn.Module):
         return x, p
 
 class Decoder(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size):
+    def __init__(self, in_channels, out_channels, kernel_size=2, stride=2, padding=0):
         super().__init__()
-        self.upD = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=2, stride=2, padding=0)
+        self.upD = nn.ConvTranspose2d(in_channels=in_channels, out_channels=out_channels, kernel_size=kernel_size, stride=stride, padding=padding)
 
-        self.convD = nn.Sequential(nn.Conv2d(in_channels=out_channels+out_channels, out_channels=out_channels, kernel_size=kernel_size, bias = False, padding = 'same'),
+        self.convD = nn.Sequential(nn.Conv2d(in_channels=out_channels+out_channels, out_channels=out_channels, kernel_size=3, bias = False, padding = 'same'),
         nn.BatchNorm2d(out_channels),
         nn.LeakyReLU(),
-        nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=kernel_size, bias = False, padding = 'same'),
+        nn.Conv2d(in_channels=out_channels, out_channels=out_channels, kernel_size=3, bias = False, padding = 'same'),
         nn.BatchNorm2d(out_channels),
         nn.LeakyReLU())
 
@@ -56,9 +56,9 @@ class Decoder(nn.Module):
         return x
 
 
-class UnetPosition(nn.Module):
-    def __init__(self, nb_max_bulles, conv_dim = 3):
-        super(UnetPosition, self).__init__()
+class UnetMap(nn.Module):
+    def __init__(self, conv_dim = 3):
+        super(UnetMap, self).__init__()
         self.e1 = Encoder(1, 64, conv_dim)
         self.e2 = Encoder(64, 128, conv_dim)
         self.e3 = Encoder(128, 256, conv_dim)
@@ -66,42 +66,29 @@ class UnetPosition(nn.Module):
 
         self.bottleneck = Bottleneck(512, 1024, conv_dim)
 
-        self.d1 = Decoder(1024, 512, conv_dim)
-        self.d2 = Decoder(512, 256, conv_dim)
-        self.d3 = Decoder(256, 128, conv_dim)
-        self.d4 = Decoder(128, 64, conv_dim)
+        self.d1 = Decoder(1024, 512)
+        self.d2 = Decoder(512, 256, kernel_size=(2,4), stride=2, padding=1)
+        self.d3 = Decoder(256, 128, kernel_size=(2,4), stride=2, padding=1)
+        self.d4 = Decoder(128, 64)
 
-        self.classifier = nn.Sequential(nn.Conv2d(64, out_channels = 1, kernel_size = 1, padding = 0),
-            nn.LeakyReLU())
-        
-        self.fc = nn.Sequential(nn.Flatten(),
-            nn.Linear(96*144, 1024),
-            nn.LeakyReLU(),
-            nn.Linear(1024, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, 2*nb_max_bulles),
+        self.classifier = nn.Sequential(nn.Conv2d(64, out_channels = 1, kernel_size = (1,2), padding = 0),
             nn.Sigmoid())
 
     def forward(self, x):
+        x = F.pad(x, (1,0,0,0,0,0)) #(pad_left, pad_right, pad_top, pad_bottom, pad_front, pad_back)
         up1, x = self.e1(x)
         up2, x = self.e2(x)
+        x = F.pad(x, (0,0,0,1,0,0))
         up3, x = self.e3(x)
+        x = F.pad(x, (0,0,0,1,0,0))
         up4, x = self.e4(x)
-        
-        up4_pad, _ = pad_to(up4, 2)
-        up3_pad, _ = pad_to(up3, 4)
-        up2_pad, _ = pad_to(up2, 8)
-        up1_pad, _ = pad_to(up1, 16)
 
         x = self.bottleneck(x)
 
-        x = self.d1(x, up4_pad)
-        x = self.d2(x, up3_pad)
-        x = self.d3(x, up2_pad)
-        x = self.d4(x, up1_pad)
+        x = self.d1(x, up4)
+        x = self.d2(x, up3)
+        x = self.d3(x, up2)
+        x = self.d4(x, up1)
         
         x = self.classifier(x)
-
-        coo = self.fc(x)
-        coo = torch.reshape(coo, (coo.shape[0], -1, 2))
-        return coo
+        return x

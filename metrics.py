@@ -1,26 +1,44 @@
 import torch
 import numpy as np
 import train as tr
-import matplotlib.pyplot as plt
 
 def get_bubble_accuracy(model, dataloader, device, max_bulles):
     model.eval()
     erreur_bulles = 0
     for IQ, ground_truth in dataloader.dataset:
         IQ, ground_truth = IQ.to(device=device, dtype=torch.float), ground_truth.to(device=device, dtype=torch.float)
-        out_numBubbles = model(torch.unsqueeze(torch.unsqueeze(IQ, 0), 0)) * max_bulles
+        out_numBubbles = model(torch.unsqueeze(IQ, 0)) * max_bulles
         Nb_ref = int(len(ground_truth[torch.isfinite(ground_truth)])/2)
         out_numBubbles = torch.squeeze(out_numBubbles).cpu().detach().numpy() if device==torch.device("cuda") else out_numBubbles.detach().numpy()
         erreur_bulles += abs(np.round(out_numBubbles) - Nb_ref)
     erreur_bulles = erreur_bulles / len(dataloader.dataset)
     return erreur_bulles
 
+def get_position_map_accuracy(model, dataloader, device):
+    model.eval()
+    jaccard, recall, precision, nbElem = 0, 0, 0, len(dataloader.dataset)
+    for IQ, ground_truth in dataloader.dataset:
+        IQ, ground_truth = IQ.to(device=device, dtype=torch.float), ground_truth.to(device=device, dtype=torch.float)
+        out_xy = model(torch.unsqueeze(IQ, 0))
+        out_xy = torch.squeeze(out_xy, 0).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(out_xy, 0).detach().numpy()
+        ground_truth = ground_truth.cpu().detach().numpy() if device==torch.device("cuda") else ground_truth.detach().numpy()
+        truth_prediction = out_xy > 0.5
+        ground_label = ground_truth > 0.5
+        TP = np.sum(truth_prediction*ground_label)
+        #TN = torch.sum(~truth_prediction*~ground_label)
+        FP = np.sum(truth_prediction*~ground_label)
+        FN = np.sum(~truth_prediction*ground_label)
+        jaccard += TP/max(TP+FP+FN, 1)
+        recall += TP/max(TP+FN, 1)
+        precision += TP/max(TP+FP, 1)
+    return jaccard / nbElem, recall / nbElem, precision / nbElem
+
 def get_position_accuracy(model, dataloader, origin, data_size, device):
     model.eval()
     accuracy, nb_ref_total, abs_diff_total= 0, 0, 0
     for IQ, ground_truth in dataloader.dataset:
         IQ, ground_truth = IQ.to(device=device, dtype=torch.float), ground_truth.to(device=device, dtype=torch.float)
-        out_xy = model(torch.unsqueeze(torch.unsqueeze(IQ, 0), 0))
+        out_xy = model(torch.unsqueeze(IQ, 0))
         out_xy = torch.squeeze(out_xy)
         ground_truth = torch.unsqueeze(ground_truth, 0)
         ground_truth = tr.process_data(ground_truth, out_xy, origin, data_size, device)

@@ -7,6 +7,7 @@ from torchvision import transforms
 from torch.nn.functional import normalize
 import os
 import torch
+import util as ut
 
 class Dataset(torch.utils.data.Dataset):
   def __init__(self, x_data, y_labels):
@@ -41,15 +42,20 @@ def load_silicoFlow_data(args):
         temp = scipy.io.loadmat(join(args.pathData,"IQ",file))
         if max_bulles is None:
             max_bulles = temp["ListPos"].shape[0]
-        xy_pos = torch.cat((xy_pos, transform(temp["ListPos"][:,[0, 2],:])), dim=0) if xy_pos is not None else transform(temp["ListPos"][:,[0, 2],:])
+        listpos = temp["ListPos"][:,[0, 2],:]
+        indices_listpos = np.argsort(listpos[:,0,:], axis=0) #trier en fonction de la coordonnée y
+        sorted_listpos = np.take_along_axis(listpos, indices_listpos[:, None, :], axis=0)
+        xy_pos = torch.cat((xy_pos, transform(sorted_listpos)), dim=0) if xy_pos is not None else transform(sorted_listpos)
         IQs = torch.cat((IQs, transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))), dim=0) if IQs is not None else transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))
     return normalize(IQs), xy_pos, Origin, data_size, max_bulles
 
 def load_dataset(args):
     X, Y, origin, data_size, max_bulles = load_silicoFlow_data(args)
+    if args.trainType == 2:
+        Y = ut.coordinates_to_mask(Y, X.shape, origin, data_size)
     x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=args.testSize, shuffle=args.shuffle)
-    dataset_train = Dataset(x_train, y_train)
-    dataset_test = Dataset(x_test, y_test)
+    dataset_train = Dataset(torch.unsqueeze(x_train, 1), torch.unsqueeze(y_train, 1))
+    dataset_test = Dataset(torch.unsqueeze(x_test, 1), torch.unsqueeze(y_test, 1))
 
     kwargs = {'num_workers': args.numWorkers, 'pin_memory': True} if args.device=='cuda' else {}
     train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=args.batchSize, shuffle=args.shuffle, **kwargs)
