@@ -6,6 +6,8 @@ from networks.UnetBulle import UnetBulle
 from networks.UnetMap import UnetMap
 import train as tr
 import torch.nn as nn
+from tkinter import Tk
+from tkinter import filedialog
 
 @dataclass
 class Args():
@@ -18,8 +20,9 @@ class Args():
     shuffle: bool #mélanger les données
     weightDecay: float
     epochs: int
-    trainType: int #0 = position, 1 = nbBulles, #2 = positionMap
+    trainType: int #0 = position, 1 = nbBulles, #2 = positionMap, #3 = localisation par centre de masse
     loss: torch.nn.Module #DynamicMSELoss() ou torch.nn.MSELoss()
+    std: float #écart type de la heatmap (seulement pour trainType = 3), valeur préférentiellement autour de 1
 
 args = Args(pathData = "D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow",
             pathSave = "D:\\ChefOeuvre\\save",
@@ -29,9 +32,10 @@ args = Args(pathData = "D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow",
             numWorkers = 1,
             shuffle = True,
             weightDecay = 0.01,
-            epochs = 1,
-            trainType = 1,
-            loss = nn.L1Loss())
+            epochs = 30,
+            trainType = 3,
+            loss = nn.MSELoss(),
+            std = 0.6)
 
 #ClutterList = [-60 -40 -30 -25 -20 -15 -10]
 
@@ -45,7 +49,23 @@ elif args.trainType == 1:
     model = UnetBulle()
     model = model.to(args.device)
     tr.train_bulle_model(model, args, train_loader, test_loader, max_bulles)
-else:
+elif args.trainType == 2:
     model = UnetMap()
     model = model.to(args.device)
     tr.train_position_map_model(model, args, train_loader, test_loader)
+else:
+    Tk().withdraw()
+    print("Veuillez choisir un modele pour effectuer la prédiction des probabilités (utilisé pour mesurer la RMSE):")
+    filename_map = filedialog.askopenfilename()
+    print("Modele choisi: ", filename_map)
+    checkpoint_map = torch.load(filename_map, map_location=args.device)
+    if checkpoint_map['model_name'] == 'UnetMap':
+        model_map = UnetMap()
+        model_map.load_state_dict(checkpoint_map['model_state_dict'])
+        model_map.to(args.device)
+    else:
+        raise Exception("Veuillez choisir un modèle Map pour effectuer la prédiction des coordonnées")
+    model = UnetMap()
+    model = model.to(args.device)
+    tr.train_heatmap_model(model, model_map, args, train_loader, test_loader, origin, data_size)
+         

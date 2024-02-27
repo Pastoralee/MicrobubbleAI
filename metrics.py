@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 import train as tr
+import util as ut
 
 def get_bubble_accuracy(model, dataloader, device, max_bulles):
     model.eval()
@@ -13,6 +14,27 @@ def get_bubble_accuracy(model, dataloader, device, max_bulles):
         erreur_bulles += abs(np.round(out_numBubbles) - Nb_ref)
     erreur_bulles = erreur_bulles / len(dataloader.dataset)
     return erreur_bulles
+
+def get_heatmap_accuracy(model, model_map, dataloader, origin, data_size, device):
+    model.eval()
+    model_map.eval()
+    rmse, erreur_nb_bulles, nbElem = 0, 0, len(dataloader.dataset)
+    for IQ, _, ground_truth in dataloader.dataset:
+        IQ, ground_truth = IQ.to(device=device, dtype=torch.float), ground_truth.to(device=device, dtype=torch.float)
+        out_xy = model(torch.unsqueeze(IQ, 0))
+        out_xy = torch.squeeze(out_xy).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(out_xy).detach().numpy()
+        out_probability_img = model_map(torch.unsqueeze(IQ, 0))
+        out_probability_img = torch.squeeze(out_probability_img).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(out_probability_img).detach().numpy()
+        ground_truth = torch.squeeze(ground_truth).cpu().detach() if device==torch.device("cuda") else torch.squeeze(ground_truth).detach()
+        ground_truth = ut.process_data(ground_truth, origin, data_size).numpy()
+        coordinates_prediction = ut.heatmap_to_coordinates(out_xy, out_probability_img)
+        nb_bubbles_predicted = len(coordinates_prediction)
+        nb_ref = len(ground_truth)
+        erreur_nb_bulles += abs(nb_ref - nb_bubbles_predicted)
+        print(erreur_nb_bulles)
+        rmse += ut.compute_rmse_adjusted_matching(coordinates_prediction, ground_truth)
+    print(nbElem)
+    return rmse / nbElem, erreur_nb_bulles / nbElem
 
 def get_position_map_accuracy(model, dataloader, device):
     model.eval()

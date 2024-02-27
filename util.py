@@ -1,6 +1,12 @@
 import torch.nn.functional as F
 import torch
 import matplotlib.pyplot as plt
+from scipy import ndimage as ndi
+from skimage.segmentation import watershed
+from scipy.optimize import linear_sum_assignment
+import numpy as np
+from skimage import filters
+import torchvision.transforms as T
 
 def pad_to(x, stride):
     h, w = x.shape[-2:]
@@ -28,23 +34,6 @@ def unpad(x, pad):
     if pad[0]+pad[1] > 0:
         x = x[:,:,:,pad[0]:-pad[1]]
     return x
-
-def process_data(positions, origin, data_size, normalisation):
-    result, nb_bulles = [], []
-    for bubble_positions in positions: #batch_size
-        pos = bubble_positions[torch.isfinite(bubble_positions)]
-        pos = torch.reshape(pos, (-1, 2))
-        pos[:, 0] = pos[:, 0] - origin[0]
-        pos[:, 1] = pos[:, 1] - origin[2]
-        pos = pos[~torch.any(pos<0, axis=1)] #enlève les valeurs inférieures à 0
-        pos = pos[torch.logical_and(pos[:, 0] <= data_size[1], pos[:, 1] <= data_size[0])] #enlève les valeurs supérieures aux bordures de l'image
-        if normalisation:
-            pos[:, 0] /= data_size[1]
-            pos[:, 1] /= data_size[0]
-        result.append(pos)
-        nb_bulles.append(pos.shape[0])
-    del pos
-    return torch.cat(result, dim=0), nb_bulles
 
 def plot_loss(epochs, losses, pathSave):
     plt.title("Loss")
@@ -78,3 +67,70 @@ def coordinates_to_mask(coordinates, shape, origin, data_size):
             xy = torch.round(xy).to(torch.int)
             Y_mask[i, xy[1], xy[0]] = 1
     return Y_mask
+
+def coordinates_to_heatmap(shape, data_size, origin, coordinates, std=1):
+    Y_heatmap = torch.zeros(shape)
+    for i, coords in enumerate(coordinates):
+        coords = process_data(coords, origin, data_size)
+        coords = torch.flip(coords, (1,))
+        heatmap = torch.zeros((data_size[0], data_size[1]), dtype=torch.float32)
+        x = torch.arange(data_size[1]).float()
+        y = torch.arange(data_size[0]).float()
+        xx, yy = torch.meshgrid(y, x, indexing='ij')
+        for x, y in coords:
+            gaussian = torch.exp(-((xx - x)**2 + (yy - y)**2) / (2 * std**2))
+            heatmap += gaussian
+        heatmap = heatmap / heatmap.max() #normalisation de la heatmap
+        Y_heatmap[i] = heatmap
+    return Y_heatmap
+
+def find_bubbles(image):
+    thresh = filters.threshold_otsu(image)
+    mask = image > thresh
+    non_black_indices = np.where(mask > 0)
+    coordinates = np.column_stack((non_black_indices[1], non_black_indices[0]))
+    return coordinates[:, ::-1]
+
+def heatmap_to_coordinates(heatmap, probabiliy_img):
+    thresh = filters.threshold_otsu(heatmap)
+    distance = ndi.distance_transform_edt(heatmap >= thresh)
+    coords = find_bubbles(probabiliy_img)
+    mask = np.zeros(distance.shape, dtype=bool)
+    mask[tuple(coords.T)] = True
+    markers, _ = ndi.label(mask)
+    labels = watershed(-distance, markers, mask=heatmap >= thresh)
+    centers = []
+    for label in np.unique(labels):
+        if label == 0:  #ignore l'arrière-plan
+            continue
+        region = labels == label
+        if heatmap[region].sum() > 0: #la région contient des pixels non nuls
+            center = ndi.center_of_mass(heatmap, labels, label)
+            centers.append(center)
+    return np.array(centers)[:, ::-1]
+
+def compute_cost_matrix(list_pred, list_gt):
+    max_size = max(len(list_pred), len(list_gt))
+    penality = 1e9
+    cost_matrix = np.full((max_size, max_size), penality)
+    for i, pred in enumerate(list_pred):
+        for j, vt in enumerate(list_gt):
+            cost_matrix[i][j] = np.sqrt((pred[0] - vt[0])**2 + (pred[1] - vt[1])**2)
+    return cost_matrix
+
+def compute_rmse_adjusted_matching(list_pred, list_gt):
+    cost_matrix = compute_cost_matrix(list_pred, list_gt)
+    row, col = linear_sum_assignment(cost_matrix)
+    total_mse = sum(cost_matrix[i, j]**2 for i, j in zip(row, col) if cost_matrix[i, j] != 1e9)
+    nb_valid_matches = sum(1 for i, j in zip(row, col) if cost_matrix[i, j] != 1e9) #exclure les penalites
+    rmse = np.sqrt(total_mse / nb_valid_matches) if nb_valid_matches > 0 else 0
+    return rmse
+
+def process_data(positions, origin, data_size):
+    positions = positions[torch.isfinite(positions)]
+    positions = torch.reshape(positions, (-1, 2))
+    positions[:, 0] = positions[:, 0] - origin[0]
+    positions[:, 1] = positions[:, 1] - origin[2]
+    positions = positions[~torch.any(positions<0, axis=1)] #enlève les valeurs inférieures à 0
+    positions = positions[torch.logical_and(positions[:, 0] <= data_size[1], positions[:, 1] <= data_size[0])] #enlève les valeurs supérieures aux bordures de l'image
+    return positions

@@ -9,6 +9,8 @@ import os
 import torch
 import util as ut
 
+import matplotlib.pyplot as plt
+
 class Dataset(torch.utils.data.Dataset):
   def __init__(self, x_data, y_labels):
         self.y = y_labels
@@ -21,6 +23,21 @@ class Dataset(torch.utils.data.Dataset):
         X = self.x[index]
         y = self.y[index]
         return X, y
+
+class HeatmapDataset(torch.utils.data.Dataset):
+  def __init__(self, x_data, y_labels, z_coordinates):
+        self.y = y_labels
+        self.x = x_data
+        self.z = z_coordinates
+
+  def __len__(self):
+        return len(self.x)
+
+  def __getitem__(self, index):
+        X = self.x[index]
+        y = self.y[index]
+        z = self.z[index]
+        return X, y, z
 
 def PALA_AddNoiseInIQ(IQ, power, impedance, sigmaGauss, clutterdB, amplCullerdB):
     max_IQ = np.max(IQ)
@@ -53,9 +70,16 @@ def load_dataset(args):
     X, Y, origin, data_size, max_bulles = load_silicoFlow_data(args)
     if args.trainType == 2:
         Y = ut.coordinates_to_mask(Y, X.shape, origin, data_size)
-    x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=args.testSize, shuffle=args.shuffle)
-    dataset_train = Dataset(torch.unsqueeze(x_train, 1), torch.unsqueeze(y_train, 1))
-    dataset_test = Dataset(torch.unsqueeze(x_test, 1), torch.unsqueeze(y_test, 1))
+    if args.trainType == 3:
+        Z = Y.clone()
+        Y = ut.coordinates_to_heatmap(X.shape, data_size, origin, Y, args.std)
+        x_train, x_test, y_train, y_test, z_train, z_test = train_test_split(X, Y, Z, test_size=args.testSize, shuffle=args.shuffle)
+        dataset_train = HeatmapDataset(torch.unsqueeze(x_train, 1), torch.unsqueeze(y_train, 1), torch.unsqueeze(z_train, 1))
+        dataset_test = HeatmapDataset(torch.unsqueeze(x_test, 1), torch.unsqueeze(y_test, 1), torch.unsqueeze(z_test, 1))
+    else:
+        x_train, x_test, y_train, y_test = train_test_split(X, Y, test_size=args.testSize, shuffle=args.shuffle)
+        dataset_train = Dataset(torch.unsqueeze(x_train, 1), torch.unsqueeze(y_train, 1))
+        dataset_test = Dataset(torch.unsqueeze(x_test, 1), torch.unsqueeze(y_test, 1))
 
     kwargs = {'num_workers': args.numWorkers, 'pin_memory': True} if args.device=='cuda' else {}
     train_loader = torch.utils.data.DataLoader(dataset_train, batch_size=args.batchSize, shuffle=args.shuffle, **kwargs)

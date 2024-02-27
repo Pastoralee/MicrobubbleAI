@@ -57,6 +57,41 @@ def get_nbBubbles_groundTruth(positions, max_bulles):
         result.append((len(bubble_positions[torch.isfinite(bubble_positions)])/2)/max_bulles)
     return torch.reshape(torch.tensor([(i) for i in result]), (-1, 1))
 
+def train_heatmap_model(model, model_map, args, train_loader, test_loader, origin, data_size):
+    optimizer = Prodigy(model.parameters(), lr=1., weight_decay=args.weightDecay)
+    scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
+    train_rmse_save, test_rmse_save, train_avg_missing_save, test_avg_missing_save, losses, epochs = [], [], [], [], [], []
+    for epoch in range(args.epochs):
+        print(f"Epoch {epoch+1}/{args.epochs}")
+        train_loss = 0
+        for IQs, ground_truth, _ in tqdm(train_loader):
+            IQs, ground_truth = IQs.to(device=args.device, dtype=torch.float), ground_truth.to(device=args.device, dtype=torch.float)
+            model.train()
+            optimizer.zero_grad()
+            out_xy = model(IQs)
+            loss_xy = args.loss(out_xy, ground_truth)
+            loss_xy.backward()
+            train_loss += loss_xy.item()
+            optimizer.step()
+        train_rmse, train_avg_missing = mt.get_heatmap_accuracy(model, model_map, train_loader, origin, data_size, args.device)
+        train_rmse_save.append(train_rmse)
+        train_avg_missing_save.append(train_avg_missing)
+        test_rmse, test_avg_missing = mt.get_heatmap_accuracy(model, model_map, test_loader, origin, data_size, args.device)
+        test_rmse_save.append(test_rmse)
+        test_avg_missing_save.append(test_avg_missing)
+        epochs.append(epoch)
+        losses.append(train_loss/len(train_loader.dataset))
+        if scheduler is not None:
+            scheduler.step()
+        print("File saved as: ", args.pathSave + '\\epoch_' + str(epoch+1) + '.pt')
+        torch.save({'model_state_dict': model.state_dict(), 'model_name': 'UnetHeatmap', 'std': args.std}, args.pathSave + '/epoch_' + str(epoch+1) + '.pt')
+        print("loss:", train_loss/len(train_loader.dataset))
+        print(f"Train: RMSE: {train_rmse}, Average missing bubbles: {train_avg_missing}")
+        print(f"Test: RMSE: {test_rmse}, Average missing bubbles: {test_avg_missing}")
+    ut.plot_loss(epochs, losses, args.pathSave)
+    ut.plot_metrics(epochs, train_rmse_save, test_rmse_save, "RMSE", args.pathSave)
+    ut.plot_metrics(epochs, train_avg_missing_save, test_avg_missing_save, "Avg Miss", args.pathSave)
+
 def train_position_map_model(model, args, train_loader, test_loader):
     optimizer = Prodigy(model.parameters(), lr=1., weight_decay=args.weightDecay)
     scheduler = lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
@@ -89,7 +124,7 @@ def train_position_map_model(model, args, train_loader, test_loader):
         torch.save({'model_state_dict': model.state_dict(), 'model_name': 'UnetMap'}, args.pathSave + '/epoch_' + str(epoch+1) + '.pt')
         print("loss:", train_loss/len(train_loader.dataset))
         print(f"Train: Jaccard: {train_jaccard}, Recall: {train_recall}, Precision: {train_precision}")
-        print(f"Train: Jaccard: {test_jaccard}, Recall: {test_recall}, Precision: {test_precision}")
+        print(f"Test: Jaccard: {test_jaccard}, Recall: {test_recall}, Precision: {test_precision}")
     ut.plot_loss(epochs, losses, args.pathSave)
     ut.plot_metrics(epochs, train_jaccard_save, test_jaccard_save, "Jaccard", args.pathSave)
     ut.plot_metrics(epochs, train_recall_save, test_recall_save, "Recall", args.pathSave)
