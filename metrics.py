@@ -31,9 +31,7 @@ def get_heatmap_accuracy(model, model_map, dataloader, origin, data_size, device
         nb_bubbles_predicted = len(coordinates_prediction)
         nb_ref = len(ground_truth)
         erreur_nb_bulles += abs(nb_ref - nb_bubbles_predicted)
-        print(erreur_nb_bulles)
         rmse += ut.compute_rmse_adjusted_matching(coordinates_prediction, ground_truth)
-    print(nbElem)
     return rmse / nbElem, erreur_nb_bulles / nbElem
 
 def get_position_map_accuracy(model, dataloader, device):

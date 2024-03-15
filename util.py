@@ -107,7 +107,7 @@ def heatmap_to_coordinates(heatmap, probabiliy_img):
         if heatmap[region].sum() > 0: #la région contient des pixels non nuls
             center = ndi.center_of_mass(heatmap, labels, label)
             centers.append(center)
-    return np.array(centers)[:, ::-1]
+    return np.array(centers)[:, ::-1] if centers else np.array([])
 
 def compute_cost_matrix(list_pred, list_gt):
     max_size = max(len(list_pred), len(list_gt))

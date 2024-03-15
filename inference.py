@@ -15,6 +15,8 @@ import json
 import matplotlib.pyplot as plt
 import util as ut
 import cv2
+from scipy import signal
+import torch.nn.functional as F
 
 #TO ADAPT
 nbSamples = 10
@@ -43,21 +45,97 @@ def read_flow_data(pathData):
         IQs = torch.cat((IQs, transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))), dim=0) if IQs is not None else transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))
     return normalize(IQs), xy_pos, Origin, data_size, max_bulles
 
+def SVDfilter(IQ,cutoff):
+	initsize = IQ.shape
+	initsize_x = initsize[0]
+	initsize_y = initsize[1]
+	initsize_z = initsize[2]
+	if cutoff[-1] > initsize[-1]:
+		cutoff = [cutoff[0],initsize[-1]]
+	if len(cutoff) == 1:
+		cutoff = [cutoff[0],initsize[-1]]
+	elif len(cutoff) == 2:
+		cutoff = [cutoff[0],cutoff[1]] 
+	if cutoff == [1,IQ.shape[2]] or cutoff[0] < 2:
+		IQf = IQ
+		return IQf
+	cutoff[0] = cutoff[0] - 1
+	cutoff[1] = cutoff[1] - 1 # in MatLab, array[200] give you access to the 200th element, unlike Python
+	X = np.reshape(IQ,(initsize_x*initsize_y,initsize_z))# % Reshape into Casorati matric
+	U,S,Vh = scipy.linalg.svd(np.dot(X.T,X)) #calculate svd of the autocorrelated Matrix
+	V = np.dot(X,U) # Calculate the singular vectors.
+	Reconst = np.dot(V[:,cutoff],U[:,cutoff].T) # Singular value decomposition
+	IQf = np.reshape(Reconst,(initsize_x,initsize_y,initsize_z)) #Reconstruction of the final filtered matrix
+	return np.absolute(IQf)
+
 def read_vivo_data(pathData):
     transform = transforms.ToTensor()
-    #sequence = scipy.io.loadmat(join(pathData,"PALA_InVivoRatBrain_Sequence_param.mat"))
-    NoiseParam = {}
-    NoiseParam["power"]        = -2;   # [dBW]
-    NoiseParam["impedance"]    = .2;   # [ohms]
-    NoiseParam["sigmaGauss"]   = 1.5;  # Gaussian filtering
-    NoiseParam["clutterdB"]    = -20;  # Clutter level in dB (will be changed later)
-    NoiseParam["amplCullerdB"] = 10;   # dB amplitude of clutter
     IQs = None
     for file in os.listdir(join(pathData,"IQ")):
         temp = scipy.io.loadmat(join(pathData,"IQ",file))
-        IQs = torch.cat((IQs, transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))), dim=0) if IQs is not None else transform(PALA_AddNoiseInIQ(np.abs(temp["IQ"]), **NoiseParam))
-        break
+        IQ = temp["IQ"]
+        framerate = temp["UF"]["FrameRateUF"][0][0][0][0]
+        cutoff = [50,framerate]
+        bulles = SVDfilter(IQ,cutoff)
+        but_b,but_a = scipy.signal.butter(2,[50/(framerate*0.5),249/(framerate*0.5)],btype='bandpass')
+        bulles = signal.lfilter(but_b,but_a,bulles,axis=2)
+        IQs = torch.cat((IQs, transform(bulles)), dim=0) if IQs is not None else transform(bulles)
     return normalize(IQs)
+
+def temp_read_vivo_data(pathData):
+    transform = transforms.ToTensor()
+    IQs = None
+    for file in os.listdir(join(pathData,"IQ")):
+        temp = scipy.io.loadmat(join(pathData,"IQ",file))
+        IQ = temp["IQ_filt"]
+        framerate = 1000
+        cutoff = [50,framerate]
+        bulles = SVDfilter(IQ,cutoff)
+        but_b,but_a = scipy.signal.butter(2,[50/(framerate*0.5),249/(framerate*0.5)],btype='bandpass')
+        bulles = signal.lfilter(but_b,but_a,bulles,axis=2)
+        bulles[np.isfinite(bulles)] = 0
+        IQs = torch.cat((IQs, IQ), dim=0) if IQs is not None else transform(IQ)
+    return normalize(IQs)
+
+def temp_in_vivo_inference():
+    print("Veuillez choisir un modele pour effectuer la prédiction par heatmap:")
+    filename_heatmap = filedialog.askopenfilename()
+    print("Modele choisi: ", filename_heatmap)
+    checkpoint_heatmap = torch.load(filename_heatmap, map_location=device)
+    if checkpoint_heatmap['model_name'] == 'UnetHeatmap':
+        model_heatmap = UnetMap()
+        model_heatmap.load_state_dict(checkpoint_heatmap['model_state_dict'])
+    else:
+        raise Exception("Veuillez choisir un modèle pour effectuer la localisation par heatmap")
+    print("Veuillez choisir un modele pour calculer les probabilités (Map):")
+    filename_map = filedialog.askopenfilename()
+    print("Modele choisi: ", filename_map)
+    checkpoint_map = torch.load(filename_map, map_location=device)
+    if checkpoint_map['model_name'] == 'UnetMap':
+        model_map = UnetMap()
+        model_map.load_state_dict(checkpoint_map['model_state_dict'])
+    else:
+        raise Exception("Veuillez choisir un modèle pour effectuer la localisation par heatmap")
+    pathData, pathSave = ask_data_and_save_path()
+    model_heatmap.eval()
+    model_heatmap.to(device)
+    model_map.eval()
+    model_map.to(device)
+    IQs = temp_read_vivo_data(pathData)
+    padding = (0, 25, 0, 6)
+    result_dict = {}
+    for i, iq in enumerate(IQs):
+        img_tensor = iq.to(device=device, dtype=torch.float)
+        img_tensor = F.pad(img_tensor, padding, "constant", 0)
+        img_tensor = torch.unsqueeze(torch.unsqueeze(img_tensor, 0), 0)
+        pos_prediction = model_heatmap(img_tensor)
+        pos_prediction = torch.squeeze(pos_prediction).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(pos_prediction).detach().numpy()
+        out_probability_img = model_map(img_tensor)
+        out_probability_img = torch.squeeze(out_probability_img).cpu().detach().numpy() if device==torch.device("cuda") else torch.squeeze(out_probability_img).detach().numpy()
+        pos_prediction = ut.heatmap_to_coordinates(pos_prediction, out_probability_img)
+        result_dict[f'pred_position_img{i}'] = pos_prediction.tolist()
+    with open(pathSave + 'result.json', 'w') as json_file:
+        json.dump(result_dict, json_file)
 
 def ask_data_and_save_path():
     print("Veuillez choisir le dossier contenant vos données (.mat):")
@@ -253,6 +331,7 @@ def in_vivo_inference():
         plt.savefig(pathSave + f"orig_img{i}.png")
         plt.clf()
 
+
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 Tk().withdraw()
 
@@ -285,6 +364,6 @@ while True:
         silico_flow_data()
         break
     elif choice_train_model == '2':
-        in_vivo_inference()
+        temp_in_vivo_inference()
         break
     print('Ce choix est invalide, veuillez choisir un nombre entre 1-2.')

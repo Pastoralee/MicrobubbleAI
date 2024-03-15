@@ -24,7 +24,7 @@ class Args():
     loss: torch.nn.Module #DynamicMSELoss() ou torch.nn.MSELoss()
     std: float #écart type de la heatmap (seulement pour trainType = 3), valeur préférentiellement autour de 1
 
-args = Args(pathData = "D:\\ChefOeuvre\\data\\PALA_data_InSilicoFlow",
+args = Args(pathData = "D:\\ChefOeuvre\\data\\added_noise",
             pathSave = "D:\\ChefOeuvre\\save",
             device = torch.device('cuda' if torch.cuda.is_available() else 'cpu'),
             testSize = 0.15,
